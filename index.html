@@ -430,10 +430,25 @@
         // Path A — fetch the model from the same directory (works when served over HTTP)
         function loadFromUrl(url) {
             statusEl.innerHTML = "Loading model…<br><small style='font-size:14px; color:#45a29e;'>Fetching " + url + "</small>";
-            loader.load(url, setupModel, undefined, function (error) {
-                console.warn('Auto-load failed; offering manual selection.', error);
-                showPicker("Couldn't auto-load <b>" + url + "</b>.<br><small style='font-size:14px; color:#ff5555;'>Select the model file to continue.</small>");
-            });
+            loader.load(
+                url,
+                setupModel,
+                // The model is large, so report download progress instead of sitting silent
+                function (event) {
+                    const mb = (event.loaded / 1048576).toFixed(1);
+                    const total = event.total ? (event.total / 1048576).toFixed(1) : null;
+                    const pct = event.total ? " (" + Math.round((event.loaded / event.total) * 100) + "%)" : "";
+                    statusEl.innerHTML = "Loading model…<br><small style='font-size:14px; color:#45a29e;'>" +
+                        mb + (total ? " / " + total : "") + " MB" + pct + "</small>";
+                },
+                function (error) {
+                    console.warn('Auto-load failed; offering manual selection.', error);
+                    const hint = location.protocol === 'file:'
+                        ? "Browsers block local file reads over file://.<br><small style='font-size:14px; color:#45a29e;'>Run <code>python3 -m http.server</code> in this folder, or select the model below.</small>"
+                        : "<small style='font-size:14px; color:#ff5555;'>Select the model file to continue.</small>";
+                    showPicker("Couldn't auto-load <b>" + url + "</b>.<br>" + hint);
+                }
+            );
         }
 
         // Path B — parse a user-provided File (works with no server, e.g. file://)
@@ -465,12 +480,9 @@
             if (file) loadFromFile(file);
         });
 
-        // Over HTTP(S) auto-load from the same path; on file:// go straight to the picker
-        if (location.protocol === 'file:') {
-            showPicker("Running without a server.<br><small style='font-size:14px; color:#45a29e;'>Select or drag in the model file (e.g. neurology.glb).</small>");
-        } else {
-            loadFromUrl('nervous_system.glb');
-        }
+        // Always try to auto-load the bundled model; the picker is only a fallback
+        // if the fetch fails (e.g. file:// where browsers block local reads).
+        loadFromUrl('nervous_system.glb');
 
         // 7. Raycasting & Interaction Setup
         const raycaster = new THREE.Raycaster();
