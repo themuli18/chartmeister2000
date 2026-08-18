@@ -1,726 +1,1390 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Human Nervous System - 3D Interactive Viewer</title>
-    <style>
-        body {
-            margin: 0;
-            overflow: hidden;
-            background-color: #0b0c10;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            color: #c5c6c7;
-        }
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sensory Map — nerve response recording</title>
 
-        #webgl-container {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100vw;
-            height: 100vh;
-            z-index: 1;
-        }
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,300..900&family=Spline+Sans+Mono:wght@300..600&display=swap" rel="stylesheet">
 
-        #css-container {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100vw;
-            height: 100vh;
-            z-index: 2;
-            /* CRITICAL: Prevent CSS container from blocking OrbitControls */
-            pointer-events: none;
-        }
+<style>
+/* ============================================================
+   SENSORY MAP
+   Design rule: the only saturated colour in this interface is a
+   measurement. All chrome is achromatic; hue appears exclusively
+   where a response has been recorded.
+   ============================================================ */
 
-        /* The modular annotation container linked to the 3D position */
-        .annotation-card {
-            background: rgba(31, 40, 51, 0.95);
-            border: 1px solid #66fcf1;
-            border-radius: 8px;
-            padding: 15px;
-            width: 320px;
-            box-shadow: 0 8px 25px rgba(0,0,0,0.7);
-            /* CRITICAL: Allow interactions specifically on the UI elements */
-            pointer-events: auto;
-            backdrop-filter: blur(6px);
-            transition: opacity 0.3s ease;
-        }
+:root {
+  /* Grounds — darkfield viewport, enamel instrument panels */
+  --field:      #101619;
+  --field-deep: #0A0F11;
+  --enamel:     #DDE3E0;
+  --enamel-lo:  #CDD5D2;
+  --ink:        #12191C;
+  --ink-mid:    #55635F;
+  --ink-low:    #7C8884;
+  --bone:       #EAF0F2;
 
-        .annotation-card h3 {
-            margin: 0 0 10px 0;
-            font-size: 16px;
-            color: #66fcf1;
-            border-bottom: 1px solid #45a29e;
-            padding-bottom: 5px;
-        }
+  --rule:       rgba(18, 25, 28, 0.16);
+  --rule-hard:  rgba(18, 25, 28, 0.38);
+  --rule-dark:  rgba(234, 240, 242, 0.14);
 
-        .close-btn {
-            position: absolute;
-            top: 10px;
-            right: 15px;
-            cursor: pointer;
-            color: #ff5555;
-            font-size: 18px;
-            font-weight: bold;
-        }
+  --panel-w:    306px;
+  --shadow:     0 18px 44px rgba(0,0,0,0.55), 0 2px 6px rgba(0,0,0,0.4);
 
-        .close-btn:hover { color: #ff0000; }
+  --ui:   'Archivo', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --mono: 'Spline Sans Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+}
 
-        .slider-section {
-            margin-bottom: 15px;
-        }
+*, *::before, *::after { box-sizing: border-box; }
 
-        .slider-label {
-            display: flex;
-            justify-content: space-between;
-            align-items: baseline;
-            font-size: 13px;
-            margin-bottom: 8px;
-        }
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--field);
+  background-image: radial-gradient(ellipse 62% 68% at 50% 47%,
+                    #182126 0%, #0F1518 62%, #080C0E 100%);
+  color: var(--bone);
+  font-family: var(--ui);
+  -webkit-font-smoothing: antialiased;
+}
 
-        .slider-value {
-            font-size: 22px;
-            font-weight: bold;
-            color: #66fcf1;
-        }
+/* Focus is expressed achromatically — never with a colour, which
+   would read as a recorded value. */
+:focus-visible {
+  outline: 2px solid var(--bone);
+  outline-offset: 2px;
+}
+.sp-panel :focus-visible,
+.sp-card  :focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
 
-        .intensity-slider {
-            width: 100%;
-            -webkit-appearance: none;
-            appearance: none;
-            height: 6px;
-            border-radius: 3px;
-            background: linear-gradient(90deg, #45a29e, #66fcf1);
-            outline: none;
-        }
+/* ---------- Viewport layers ---------------------------------- */
 
-        .intensity-slider::-webkit-slider-thumb {
-            -webkit-appearance: none;
-            appearance: none;
-            width: 18px;
-            height: 18px;
-            border-radius: 50%;
-            background: #66fcf1;
-            border: 2px solid #0b0c10;
-            cursor: pointer;
-        }
+#webgl-container,
+#css-container {
+  position: absolute;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+}
+#webgl-container { z-index: 1; }
+#css-container   { z-index: 2; pointer-events: none; }
 
-        .intensity-slider::-moz-range-thumb {
-            width: 18px;
-            height: 18px;
-            border-radius: 50%;
-            background: #66fcf1;
-            border: 2px solid #0b0c10;
-            cursor: pointer;
-        }
+/* ---------- Top rail ----------------------------------------- */
 
-        .note-section {
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-        }
+.sp-rail {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  z-index: 12;
+  display: grid;
+  /* minmax(0,1fr) lets the middle column drop below its min-content
+     width, which is what actually lets the hint wrap. */
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    "mark word  tally"
+    "mark hint  tally";
+  column-gap: 16px;
+  align-items: start;
+  padding: 18px 22px 20px;
+  pointer-events: none;
+  background: linear-gradient(to bottom, rgba(10,15,17,0.88) 0%, rgba(10,15,17,0.0) 100%);
+}
 
-        .note-input {
-            width: 100%;
-            height: 60px;
-            background: #0b0c10;
-            border: 1px solid #45a29e;
-            color: #fff;
-            padding: 5px;
-            border-radius: 4px;
-            resize: none;
-            box-sizing: border-box;
-            font-family: inherit;
-        }
+/* The identity mark is the instrument in miniature — and doubles
+   as the legend for the marker colours on the model. */
+.sp-mark { grid-area: mark; padding-top: 3px; }
 
-        .save-btn {
-            background: #45a29e;
-            color: #0b0c10;
-            border: none;
-            padding: 8px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-weight: bold;
-            transition: background 0.2s;
-        }
+.sp-mark-bars {
+  display: flex;
+  gap: 1px;
+  height: 22px;
+  align-items: flex-end;
+}
+.sp-mark-bars i {
+  display: block;
+  width: 4px;
+  border-radius: 0.5px;
+}
 
-        .save-btn:hover { background: #66fcf1; }
+.sp-mark-scale {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 400;
+  letter-spacing: 0.06em;
+  color: var(--ink-low);
+  margin-top: 5px;
+}
 
-        .saved-note-display {
-            background: #0b0c10;
-            padding: 10px;
-            border-left: 3px solid #66fcf1;
-            font-size: 13px;
-            display: none; /* Hidden until saved */
-            word-wrap: break-word;
-        }
+.sp-wordmark {
+  grid-area: word;
+  margin: 0;
+  font-size: 17px;
+  font-weight: 800;
+  font-variation-settings: 'wdth' 118;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--bone);
+  line-height: 1.1;
+}
 
-        /* Numbered marker anchored at each recorded point in 3D space */
-        .point-marker {
-            width: 26px;
-            height: 26px;
-            border-radius: 50%;
-            background: #66fcf1;
-            color: #0b0c10;
-            font-weight: bold;
-            font-size: 13px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            border: 2px solid #0b0c10;
-            box-shadow: 0 0 8px rgba(102,252,241,0.8);
-            /* Must not block raycasting on the model */
-            pointer-events: none;
-        }
+.sp-hint {
+  grid-area: hint;
+  margin: 7px 0 0;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  font-weight: 300;
+  letter-spacing: 0.01em;
+  color: var(--ink-low);
+}
+.sp-hint b {
+  font-weight: 500;
+  color: #9AA6A2;
+}
+/* Each instruction stays whole; the line breaks only between them */
+.sp-hint span { white-space: nowrap; margin-right: 0.7em; }
 
-        /* Recorded-points list panel */
-        #points-panel {
-            position: absolute;
-            top: 20px;
-            right: 20px;
-            width: 300px;
-            max-height: 80vh;
-            display: none; /* toggled to flex once a point exists */
-            flex-direction: column;
-            background: rgba(31, 40, 51, 0.95);
-            border: 1px solid #45a29e;
-            border-radius: 8px;
-            z-index: 15;
-            backdrop-filter: blur(6px);
-            box-shadow: 0 8px 25px rgba(0,0,0,0.7);
-            overflow: hidden;
-        }
+/* Name the gesture the device actually has. Both rules carry the same
+   specificity, so the media query wins by order — not by accident. */
+.sp-hint .sp-coarse { display: none; }
+@media (pointer: coarse) {
+  .sp-hint .sp-fine   { display: none; }
+  .sp-hint .sp-coarse { display: inline; }
+}
 
-        #points-panel h3 {
-            margin: 0;
-            padding: 12px 15px;
-            font-size: 15px;
-            color: #66fcf1;
-            border-bottom: 1px solid #45a29e;
-        }
+.sp-tally {
+  grid-area: tally;
+  justify-self: end;
+  text-align: right;
+  pointer-events: none;
+}
+.sp-tally-n {
+  display: block;
+  font-size: 30px;
+  font-weight: 700;
+  font-variation-settings: 'wdth' 112;
+  line-height: 0.9;
+  color: var(--bone);
+  font-variant-numeric: tabular-nums;
+}
+.sp-tally-l {
+  display: block;
+  margin-top: 5px;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-low);
+}
 
-        #points-panel h3 span {
-            color: #45a29e;
-            font-size: 13px;
-        }
+/* ---------- Findings panel ----------------------------------- */
 
-        #points-list {
-            overflow-y: auto;
-            padding: 8px;
-        }
+.sp-panel {
+  position: absolute;
+  top: 104px;
+  right: 22px;
+  z-index: 11;
+  width: var(--panel-w);
+  max-height: calc(100vh - 148px);
+  display: none;            /* → flex once a finding exists */
+  flex-direction: column;
+  background: var(--enamel);
+  color: var(--ink);
+  border-radius: 3px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+.sp-panel.is-open { display: flex; }
 
-        .point-row {
-            display: flex;
-            align-items: flex-start;
-            gap: 10px;
-            padding: 8px;
-            border-radius: 6px;
-            cursor: pointer;
-            transition: background 0.15s;
-        }
+.sp-panel-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 13px 15px 11px;
+  border-bottom: 1px solid var(--rule-hard);
+}
+.sp-panel-title {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.17em;
+  text-transform: uppercase;
+  font-variation-settings: 'wdth' 108;
+}
+.sp-panel-sub {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  color: var(--ink-mid);
+}
 
-        .point-row:hover { background: rgba(102,252,241,0.08); }
+.sp-list {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 4px 0 6px;
+}
 
-        .point-badge {
-            flex: 0 0 24px;
-            height: 24px;
-            border-radius: 50%;
-            background: #66fcf1;
-            color: #0b0c10;
-            font-weight: bold;
-            font-size: 12px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            margin-top: 2px;
-        }
+.sp-row {
+  display: grid;
+  grid-template-columns: 1fr 22px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 15px;
+  border-bottom: 1px solid var(--rule);
+}
+.sp-list .sp-row:last-child { border-bottom: 0; }
+.sp-row:hover { background: var(--enamel-lo); }
 
-        .point-body { flex: 1; min-width: 0; }
+.sp-row-main {
+  display: grid;
+  grid-template-columns: 34px 1fr;
+  align-items: start;
+  gap: 11px;
+  width: 100%;
+  padding: 9px 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
 
-        .point-score {
-            font-weight: bold;
-            color: #fff;
-            font-size: 14px;
-        }
+.sp-row-val {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 34px;
+  border-radius: 2px;
+  font-size: 17px;
+  font-weight: 800;
+  font-variation-settings: 'wdth' 100;
+  font-variant-numeric: tabular-nums;
+  box-shadow: inset 0 0 0 1px rgba(18,25,28,0.22);
+}
 
-        .point-score small { color: #7c8a8a; font-weight: normal; }
+/* These are spans inside a button, so each must be told to stack. */
+.sp-row-body { display: block; min-width: 0; padding-top: 1px; }
 
-        .point-name {
-            font-size: 12px;
-            color: #66fcf1;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
+.sp-row-site {
+  display: block;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sp-row-idx {
+  display: block;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0.1em;
+  color: var(--ink-mid);
+  text-transform: uppercase;
+  margin-top: 3px;
+}
+.sp-row-note {
+  display: block;
+  font-size: 12.5px;
+  line-height: 1.42;
+  color: #33413D;
+  margin-top: 5px;
+  overflow-wrap: anywhere;
+}
 
-        .point-note {
-            font-size: 12px;
-            color: #c5c6c7;
-            word-wrap: break-word;
-            margin-top: 2px;
-        }
+.sp-row-del {
+  align-self: center;
+  width: 22px; height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 2px;
+  background: transparent;
+  color: var(--ink-mid);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+.sp-row-del:hover { background: var(--ink); color: var(--enamel); }
 
-        .point-del {
-            flex: 0 0 auto;
-            color: #ff5555;
-            cursor: pointer;
-            font-weight: bold;
-            padding: 0 4px;
-        }
+/* ---------- Marker anchored on the model --------------------- */
 
-        .point-del:hover { color: #ff0000; }
+/* CSS2DRenderer writes `transform` on .sp-marker every frame to place it,
+   so the badge that scales in must be a separate, inner element. */
+.sp-marker {
+  position: relative;
+  width: 0; height: 0;
+  pointer-events: none;   /* must not block raycasting */
+}
 
-        #ui-overlay {
-            position: absolute;
-            top: 20px;
-            left: 20px;
-            z-index: 10;
-            pointer-events: none;
-        }
+.sp-marker-dot {
+  position: absolute;
+  left: -13px; top: -13px;
+  width: 26px; height: 26px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  box-shadow: 0 0 0 2px var(--field-deep), 0 2px 10px rgba(0,0,0,0.6);
+}
+.sp-marker.is-new .sp-marker-dot {
+  animation: sp-drop 380ms cubic-bezier(0.2, 0.9, 0.25, 1) both;
+}
+@keyframes sp-drop {
+  0%   { transform: scale(0.3); opacity: 0; }
+  60%  { transform: scale(1.12); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
 
-        #loading {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            z-index: 20;
-            font-size: 24px;
-            text-align: center;
-            background: rgba(0,0,0,0.8);
-            padding: 30px;
-            border-radius: 10px;
-            border: 1px solid #45a29e;
-        }
-    </style>
+/* ---------- Record card (anchored in 3D) --------------------- */
 
-    <!-- Import Map for ES Modules -->
-    <script type="importmap">
-        {
-            "imports": {
-                "three": "https://cdn.jsdelivr.net/npm/three@0.150.1/build/three.module.js",
-                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.150.1/examples/jsm/"
-            }
-        }
-    </script>
+.sp-anchor {
+  position: relative;
+  width: 0; height: 0;
+  pointer-events: none;
+}
+/* Stem tying the card to the point it describes */
+.sp-anchor::before {
+  content: '';
+  position: absolute;
+  left: -1px; bottom: 4px;
+  width: 1px; height: 30px;
+  background: linear-gradient(to top, rgba(221,227,224,0.15), var(--enamel));
+}
+.sp-anchor.is-below::before {
+  bottom: auto;
+  top: 4px;
+  background: linear-gradient(to bottom, rgba(221,227,224,0.15), var(--enamel));
+}
+.sp-anchor::after {
+  content: '';
+  position: absolute;
+  left: -3px; bottom: 1px;
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  background: var(--enamel);
+}
+
+.sp-card {
+  position: absolute;
+  bottom: 34px;
+  left: 0;
+  /* --nudge keeps the card inside the viewport horizontally */
+  transform: translateX(calc(-50% + var(--nudge, 0px)));
+  width: 340px;
+  max-width: calc(100vw - 32px);
+  padding: 14px 15px 15px;
+  background: var(--enamel);
+  color: var(--ink);
+  border-radius: 3px;
+  box-shadow: var(--shadow);
+  pointer-events: auto;
+}
+.sp-anchor.is-below .sp-card { bottom: auto; top: 34px; }
+
+.sp-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 11px;
+  border-bottom: 1px solid var(--rule-hard);
+}
+.sp-card-title {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.17em;
+  text-transform: uppercase;
+  font-variation-settings: 'wdth' 108;
+}
+.sp-card-site {
+  display: block;
+  margin-top: 5px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--ink-mid);
+  overflow-wrap: anywhere;
+}
+.sp-card-close {
+  flex: 0 0 auto;
+  width: 24px; height: 24px;
+  margin: -3px -4px 0 0;
+  padding: 0;
+  border: 0;
+  border-radius: 2px;
+  background: transparent;
+  color: var(--ink-mid);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+.sp-card-close:hover { background: var(--ink); color: var(--enamel); }
+
+/* --- The instrument: readout + 11-rung ladder ---------------- */
+
+.sp-gauge {
+  display: flex;
+  align-items: flex-end;
+  gap: 13px;
+  padding: 13px 0 9px;
+}
+
+.sp-readout {
+  flex: 0 0 auto;
+  font-size: 52px;
+  font-weight: 800;
+  font-variation-settings: 'wdth' 122;
+  line-height: 0.82;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  min-width: 74px;
+  transition: color 140ms linear;
+}
+
+.sp-gauge-label {
+  flex: 1 1 auto;
+  padding-bottom: 4px;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 400;
+  line-height: 1.5;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--ink-mid);
+}
+.sp-gauge-label b {
+  display: block;
+  font-weight: 500;
+  color: var(--ink);
+  letter-spacing: 0.06em;
+  text-transform: none;
+  font-size: 11.5px;
+}
+
+.sp-ladder {
+  display: grid;
+  grid-template-columns: repeat(11, 1fr);
+  gap: 1px;
+  background: var(--rule-hard);
+  border: 1px solid var(--rule-hard);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.sp-rung {
+  appearance: none;
+  border: 0;
+  padding: 0;
+  height: 38px;
+  background: var(--enamel);
+  color: var(--ink-mid);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: background 110ms linear, color 110ms linear;
+}
+.sp-rung:hover { background: var(--enamel-lo); color: var(--ink); }
+.sp-rung.is-set { font-weight: 600; }
+.sp-rung:focus-visible { outline-offset: -3px; }
+
+.sp-anchors {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  font-weight: 400;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--ink-low);
+}
+.sp-anchors span:nth-child(2) { text-align: center; }
+.sp-anchors span:last-child   { text-align: right; }
+
+/* --- Note + commit ------------------------------------------- */
+
+.sp-field { margin-top: 14px; }
+
+.sp-field-label {
+  display: block;
+  margin-bottom: 6px;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-mid);
+}
+
+.sp-note {
+  display: block;
+  width: 100%;
+  height: 58px;
+  padding: 8px 9px;
+  background: #F1F5F3;
+  border: 1px solid var(--rule-hard);
+  border-radius: 2px;
+  color: var(--ink);
+  font-family: var(--ui);
+  font-size: 13px;
+  line-height: 1.45;
+  resize: none;
+}
+.sp-note::placeholder { color: var(--ink-low); }
+.sp-note:focus { border-color: var(--ink); }
+
+.sp-commit {
+  width: 100%;
+  margin-top: 11px;
+  padding: 11px;
+  border: 0;
+  border-radius: 2px;
+  background: var(--ink);
+  color: var(--enamel);
+  font-family: var(--ui);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  font-variation-settings: 'wdth' 106;
+  cursor: pointer;
+  transition: background 120ms linear;
+}
+.sp-commit:hover { background: #2C3A36; }
+
+/* ---------- Loading ------------------------------------------ */
+
+.sp-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--field-deep);
+}
+.sp-loading[hidden] { display: none; }
+
+.sp-load-card {
+  width: 100%;
+  max-width: 400px;
+  text-align: left;
+}
+
+.sp-load-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.19em;
+  text-transform: uppercase;
+  font-variation-settings: 'wdth' 116;
+  color: var(--bone);
+}
+
+.sp-load-status {
+  margin: 26px 0 10px;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 300;
+  line-height: 1.6;
+  color: #9AA6A2;
+}
+.sp-load-status b { font-weight: 500; color: var(--bone); }
+.sp-load-status code {
+  font-family: var(--mono);
+  color: var(--bone);
+}
+
+.sp-track {
+  height: 3px;
+  background: rgba(234,240,242,0.13);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.sp-track-fill {
+  height: 100%;
+  width: 0%;
+  background: var(--bone);
+  transition: width 180ms linear;
+}
+
+.sp-load-meter {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 8px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  color: var(--ink-low);
+  font-variant-numeric: tabular-nums;
+}
+
+.sp-picker { margin-top: 24px; }
+.sp-picker[hidden] { display: none; }
+
+.sp-pick-btn {
+  display: inline-block;
+  padding: 11px 18px;
+  border-radius: 2px;
+  background: var(--bone);
+  color: var(--ink);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-variation-settings: 'wdth' 106;
+  cursor: pointer;
+}
+.sp-pick-btn:hover { background: #FFFFFF; }
+.sp-pick-alt {
+  margin: 11px 0 0;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 300;
+  color: var(--ink-low);
+}
+
+.sp-vh {
+  position: absolute;
+  width: 1px; height: 1px;
+  margin: -1px; padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ---------- Narrow screens ----------------------------------- */
+
+@media (max-width: 720px) {
+  .sp-rail { padding: 14px 16px 16px; column-gap: 12px; }
+  .sp-hint { font-size: 10.5px; line-height: 1.75; }
+  .sp-hint span { margin-right: 0.5em; }
+  .sp-wordmark { font-size: 15px; }
+  .sp-panel {
+    top: auto;
+    bottom: 0;
+    left: 0; right: 0;
+    width: auto;
+    max-height: 42vh;
+    border-radius: 3px 3px 0 0;
+  }
+  .sp-card { width: min(340px, calc(100vw - 24px)); }
+  .sp-readout { font-size: 44px; min-width: 62px; }
+  .sp-rung { height: 42px; }
+}
+
+/* Phone widths: a single instruction is wider than the column, so stop
+   holding them on one line and stack them as a short list instead. */
+@media (max-width: 480px) {
+  .sp-hint {
+    font-size: 10px;
+    line-height: 1.6;
+  }
+  .sp-hint span {
+    display: block;
+    white-space: normal;
+    margin-right: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+</style>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.150.1/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.150.1/examples/jsm/"
+  }
+}
+</script>
 </head>
 <body>
-    <div id="loading">
-        <div id="loading-status">Initializing Neuro-Spatial Viewer...</div>
-        <div id="loading-picker" style="display:none; margin-top:14px;">
-            <label for="model-file" class="save-btn" style="display:inline-block; padding:10px 18px;">Select model (.glb / .gltf)</label>
-            <input id="model-file" type="file" accept=".glb,.gltf,model/gltf-binary,model/gltf+json" style="display:none;">
-            <div style="font-size:13px; color:#45a29e; margin-top:10px;">…or drag the model file anywhere onto this window</div>
-        </div>
+
+<!-- Top rail: mark doubles as the response-colour legend -->
+<header class="sp-rail">
+  <div class="sp-mark" aria-hidden="true">
+    <div class="sp-mark-bars" id="mark-bars"></div>
+    <div class="sp-mark-scale"><span>0</span><span>10</span></div>
+  </div>
+
+  <h1 class="sp-wordmark">Sensory Map</h1>
+
+  <p class="sp-hint">
+    <span><b>Drag</b> to rotate</span>
+    <span class="sp-fine"><b>Scroll</b> to zoom</span>
+    <span class="sp-coarse"><b>Pinch</b> to zoom</span>
+    <span class="sp-fine"><b>Double-click the model</b> to record a response</span>
+    <span class="sp-coarse"><b>Double-tap the model</b> to record a response</span>
+  </p>
+
+  <div class="sp-tally">
+    <span class="sp-tally-n" id="tally-n">0</span>
+    <span class="sp-tally-l" id="tally-l">findings</span>
+  </div>
+</header>
+
+<!-- Findings, ordered by response -->
+<section class="sp-panel" id="panel" aria-labelledby="panel-title">
+  <div class="sp-panel-head">
+    <h2 class="sp-panel-title" id="panel-title">Findings</h2>
+    <span class="sp-panel-sub">by response</span>
+  </div>
+  <div class="sp-list" id="list"></div>
+</section>
+
+<div id="webgl-container"></div>
+<div id="css-container"></div>
+
+<!-- Loading -->
+<div class="sp-loading" id="loading">
+  <div class="sp-load-card">
+    <h2 class="sp-load-title">Sensory Map</h2>
+
+    <p class="sp-load-status" id="load-status">Preparing the viewer</p>
+
+    <div class="sp-track" id="track">
+      <div class="sp-track-fill" id="track-fill"></div>
+    </div>
+    <div class="sp-load-meter">
+      <span id="load-bytes">—</span>
+      <span id="load-pct"></span>
     </div>
 
-    <div id="ui-overlay">
-        <h2 style="margin: 0; color: #66fcf1;">Nervous System Topology</h2>
-        <p style="margin: 5px 0; font-size: 14px;">Left Click + Drag: Rotate | Scroll: Zoom | Click Nerve: Record Response</p>
+    <div class="sp-picker" id="picker" hidden>
+      <label class="sp-pick-btn" for="model-file">Choose model file</label>
+      <input class="sp-vh" id="model-file" type="file"
+             accept=".glb,.gltf,model/gltf-binary,model/gltf+json">
+      <p class="sp-pick-alt">or drop a .glb / .gltf anywhere on this window</p>
     </div>
-
-    <div id="points-panel">
-        <h3>Recorded Points <span id="points-count">0</span></h3>
-        <div id="points-list"></div>
-    </div>
-
-    <div id="webgl-container"></div>
-    <div id="css-container"></div>
-
-    <script type="module">
-        import * as THREE from 'three';
-        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-        import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
-
-        // 1. Core Scene & Camera Setup
-        const scene = new THREE.Scene();
-        scene.fog = new THREE.FogExp2(0x0b0c10, 0.03);
-
-        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
-        camera.position.set(0, 1.5, 4);
-
-        // 2. WebGL Renderer Initialization
-        const webglContainer = document.getElementById('webgl-container');
-        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // Performance optimization
-        renderer.outputEncoding = THREE.sRGBEncoding;
-        webglContainer.appendChild(renderer.domElement);
-
-        // 3. CSS2D Renderer for HTML Overlays
-        const cssContainer = document.getElementById('css-container');
-        const labelRenderer = new CSS2DRenderer();
-        labelRenderer.setSize(window.innerWidth, window.innerHeight);
-        labelRenderer.domElement.style.position = 'absolute';
-        labelRenderer.domElement.style.top = '0px';
-        cssContainer.appendChild(labelRenderer.domElement);
-
-        // 4. Lighting Configuration
-        const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
-        scene.add(ambientLight);
-
-        const dirLight = new THREE.DirectionalLight(0xe0f2fe, 1.2);
-        dirLight.position.set(5, 10, 7);
-        scene.add(dirLight);
-
-        const backLight = new THREE.DirectionalLight(0x45a29e, 0.8);
-        backLight.position.set(-5, -5, -7);
-        scene.add(backLight);
-
-        // 5. OrbitControls Configuration
-        const controls = new OrbitControls(camera, renderer.domElement);
-        controls.enableDamping = true;
-        controls.dampingFactor = 0.05;
-        controls.target.set(0, 1, 0);
-
-        // 6. Load GLB Model
-        let nervousSystemModel = null;
-        const loader = new GLTFLoader();
-
-        const loadingEl = document.getElementById('loading');
-        const statusEl = document.getElementById('loading-status');
-        const pickerEl = document.getElementById('loading-picker');
-
-        // Shared post-load setup: center, frame the camera, tune materials, reveal
-        function setupModel(gltf) {
-            nervousSystemModel = gltf.scene;
-
-            // Automatically compute bounding box to center the model
-            const box = new THREE.Box3().setFromObject(nervousSystemModel);
-            const center = box.getCenter(new THREE.Vector3());
-            const size = box.getSize(new THREE.Vector3());
-            nervousSystemModel.position.sub(center);
-
-            // Fit camera to the model regardless of its native scale
-            const maxDim = Math.max(size.x, size.y, size.z);
-            const fitDist = (maxDim / 2) / Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
-            camera.position.set(0, 0, fitDist * 1.6);
-            camera.near = maxDim / 100;
-            camera.far = fitDist * 100;
-            camera.updateProjectionMatrix();
-            controls.target.set(0, 0, 0);
-            controls.minDistance = maxDim * 0.2;
-            controls.maxDistance = fitDist * 8;
-            controls.update();
-
-            // Scale exponential fog to the model's size so it doesn't swallow large models
-            scene.fog.density = 0.6 / (fitDist * 1.6);
-
-            // Enhance material visibility
-            nervousSystemModel.traverse((child) => {
-                if (child.isMesh) {
-                    child.material.transparent = true;
-                    child.material.opacity = 0.9;
-                    child.material.emissive = new THREE.Color(0x112233);
-                    child.material.emissiveIntensity = 0.2;
-                }
-            });
-
-            scene.add(nervousSystemModel);
-            loadingEl.style.display = 'none';
-        }
-
-        // Show the manual picker/drop UI (used on file:// or when auto-load fails)
-        function showPicker(message) {
-            statusEl.innerHTML = message;
-            pickerEl.style.display = 'block';
-        }
-
-        // Path A — fetch the model from the same directory (works when served over HTTP)
-        function loadFromUrl(url) {
-            statusEl.innerHTML = "Loading model…<br><small style='font-size:14px; color:#45a29e;'>Fetching " + url + "</small>";
-            loader.load(
-                url,
-                setupModel,
-                // The model is large, so report download progress instead of sitting silent
-                function (event) {
-                    const mb = (event.loaded / 1048576).toFixed(1);
-                    const total = event.total ? (event.total / 1048576).toFixed(1) : null;
-                    const pct = event.total ? " (" + Math.round((event.loaded / event.total) * 100) + "%)" : "";
-                    statusEl.innerHTML = "Loading model…<br><small style='font-size:14px; color:#45a29e;'>" +
-                        mb + (total ? " / " + total : "") + " MB" + pct + "</small>";
-                },
-                function (error) {
-                    console.warn('Auto-load failed; offering manual selection.', error);
-                    const hint = location.protocol === 'file:'
-                        ? "Browsers block local file reads over file://.<br><small style='font-size:14px; color:#45a29e;'>Run <code>python3 -m http.server</code> in this folder, or select the model below.</small>"
-                        : "<small style='font-size:14px; color:#ff5555;'>Select the model file to continue.</small>";
-                    showPicker("Couldn't auto-load <b>" + url + "</b>.<br>" + hint);
-                }
-            );
-        }
-
-        // Path B — parse a user-provided File (works with no server, e.g. file://)
-        function loadFromFile(file) {
-            statusEl.innerHTML = "Reading " + file.name + "…";
-            pickerEl.style.display = 'none';
-            loadingEl.style.display = 'block';
-            file.arrayBuffer().then(function (buf) {
-                loader.parse(buf, '', setupModel, function (error) {
-                    console.error('Failed to parse selected model.', error);
-                    showPicker("That file couldn't be parsed as glTF.<br><small style='font-size:14px; color:#ff5555;'>Try another .glb / .gltf file.</small>");
-                });
-            }).catch(function (error) {
-                console.error('Failed to read selected file.', error);
-                showPicker("Couldn't read that file.<br><small style='font-size:14px; color:#ff5555;'>Try again.</small>");
-            });
-        }
-
-        // Wire the file input
-        document.getElementById('model-file').addEventListener('change', function (e) {
-            if (e.target.files && e.target.files[0]) loadFromFile(e.target.files[0]);
-        });
-
-        // Drag-and-drop the model anywhere onto the window
-        window.addEventListener('dragover', function (e) { e.preventDefault(); });
-        window.addEventListener('drop', function (e) {
-            e.preventDefault();
-            const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
-            if (file) loadFromFile(file);
-        });
-
-        // Always try to auto-load the bundled model; the picker is only a fallback
-        // if the fetch fails (e.g. file:// where browsers block local reads).
-        loadFromUrl('nervous_system.glb');
-
-        // 7. Raycasting & Interaction Setup
-        const raycaster = new THREE.Raycaster();
-
-        // Optimize thresholds for potential Line or Point-based nerve architectures
-        raycaster.params.Line.threshold = 0.05;
-        raycaster.params.Points.threshold = 0.05;
-
-        const mouse = new THREE.Vector2();
-
-        window.addEventListener('pointerdown', onPointerDown);
-
-        function onPointerDown(event) {
-            // Early exit if the user is clicking on the annotation card or the points list
-            if (event.target.closest('.annotation-card') || event.target.closest('#points-panel')) return;
-
-            // Calculate mouse position in NDC (-1 to +1)
-            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
-            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
-
-            raycaster.setFromCamera(mouse, camera);
-
-            if (nervousSystemModel) {
-                const intersects = raycaster.intersectObject(nervousSystemModel, true);
-
-                if (intersects.length > 0) {
-                    const hit = intersects[0];
-                    // Retrieve object name from GLB hierarchy, fallback to generic descriptor
-                    const nodeName = hit.object.name || "Peripheral Nerve Fascicle";
-                    createSpatialAnnotation(hit.point, nodeName);
-                }
-            }
-        }
-
-        // 8. Recorded points: data store, persistence, markers, and sorted list
-
-        const STORAGE_KEY = 'nsv_points_v1';
-        let points = [];            // { id, n, name, x, y, z, intensity, note }
-        let nextN = 1;
-        const markers = new Map();  // id -> CSS2DObject (numbered badge in 3D space)
-
-        const panelEl = document.getElementById('points-panel');
-        const listEl = document.getElementById('points-list');
-        const countEl = document.getElementById('points-count');
-
-        function loadPoints() {
-            try {
-                const raw = localStorage.getItem(STORAGE_KEY);
-                points = raw ? (JSON.parse(raw) || []) : [];
-            } catch (e) {
-                points = [];
-            }
-            nextN = points.reduce((m, p) => Math.max(m, p.n), 0) + 1;
-        }
-
-        function savePoints() {
-            try { localStorage.setItem(STORAGE_KEY, JSON.stringify(points)); } catch (e) {}
-        }
-
-        // A small numbered badge anchored at the point's 3D location
-        function addMarker(p) {
-            const el = document.createElement('div');
-            el.className = 'point-marker';
-            el.textContent = p.n;
-            const obj = new CSS2DObject(el);
-            obj.position.set(p.x, p.y, p.z);
-            scene.add(obj);
-            markers.set(p.id, obj);
-        }
-
-        function removeMarker(id) {
-            const obj = markers.get(id);
-            if (obj) { scene.remove(obj); markers.delete(id); }
-        }
-
-        function deletePoint(id) {
-            removeMarker(id);
-            points = points.filter(p => p.id !== id);
-            savePoints();
-            renderList();
-        }
-
-        // Re-center the orbit target on a point (clicking a list row)
-        function focusPoint(p) {
-            controls.target.set(p.x, p.y, p.z);
-            controls.update();
-        }
-
-        // Render the list, sorted by response intensity (highest first)
-        function renderList() {
-            countEl.textContent = points.length;
-            listEl.innerHTML = '';
-            panelEl.style.display = points.length ? 'flex' : 'none';
-
-            const sorted = [...points].sort((a, b) => b.intensity - a.intensity);
-            for (const p of sorted) {
-                const row = document.createElement('div');
-                row.className = 'point-row';
-                row.onclick = () => focusPoint(p);
-
-                const badge = document.createElement('div');
-                badge.className = 'point-badge';
-                badge.textContent = p.n;
-
-                const body = document.createElement('div');
-                body.className = 'point-body';
-
-                const score = document.createElement('div');
-                score.className = 'point-score';
-                score.innerHTML = p.intensity + ' <small>/ 10</small>';
-                body.appendChild(score);
-
-                const name = document.createElement('div');
-                name.className = 'point-name';
-                name.textContent = p.name;
-                body.appendChild(name);
-
-                if (p.note) {
-                    const note = document.createElement('div');
-                    note.className = 'point-note';
-                    note.textContent = p.note;
-                    body.appendChild(note);
-                }
-
-                const del = document.createElement('span');
-                del.className = 'point-del';
-                del.innerHTML = '&times;';
-                del.title = 'Remove point';
-                del.onclick = (e) => { e.stopPropagation(); deletePoint(p.id); };
-
-                row.appendChild(badge);
-                row.appendChild(body);
-                row.appendChild(del);
-                listEl.appendChild(row);
-            }
-        }
-
-        // The click-spawned card: slider for perceived response (0-10) + note
-        function createSpatialAnnotation(position, nodeName) {
-            const card = document.createElement('div');
-            card.className = 'annotation-card';
-
-            let cardObject; // assigned below; referenced by the close/save handlers
-
-            const closeBtn = document.createElement('span');
-            closeBtn.className = 'close-btn';
-            closeBtn.innerHTML = '&times;';
-            closeBtn.onclick = () => { scene.remove(cardObject); card.remove(); };
-            card.appendChild(closeBtn);
-
-            const title = document.createElement('h3');
-            title.innerText = `Node: ${nodeName}`;
-            card.appendChild(title);
-
-            // Perceived-response slider (0-10) with live readout
-            const sliderSection = document.createElement('div');
-            sliderSection.className = 'slider-section';
-
-            const sliderLabel = document.createElement('div');
-            sliderLabel.className = 'slider-label';
-            const sliderText = document.createElement('span');
-            sliderText.textContent = 'Perceived response (0–10)';
-            const sliderValue = document.createElement('span');
-            sliderValue.className = 'slider-value';
-            sliderValue.textContent = '5';
-            sliderLabel.appendChild(sliderText);
-            sliderLabel.appendChild(sliderValue);
-
-            const slider = document.createElement('input');
-            slider.type = 'range';
-            slider.min = '0';
-            slider.max = '10';
-            slider.step = '1';
-            slider.value = '5';
-            slider.className = 'intensity-slider';
-            slider.oninput = () => { sliderValue.textContent = slider.value; };
-
-            sliderSection.appendChild(sliderLabel);
-            sliderSection.appendChild(slider);
-            card.appendChild(sliderSection);
-
-            // Optional note
-            const noteSection = document.createElement('div');
-            noteSection.className = 'note-section';
-            const textArea = document.createElement('textarea');
-            textArea.className = 'note-input';
-            textArea.placeholder = "Enter clinical or anatomical observation here...";
-            const saveBtn = document.createElement('button');
-            saveBtn.className = 'save-btn';
-            saveBtn.innerText = "Save Point";
-            noteSection.appendChild(textArea);
-            noteSection.appendChild(saveBtn);
-            card.appendChild(noteSection);
-
-            saveBtn.onclick = () => {
-                const p = {
-                    id: 'p_' + Date.now() + '_' + nextN,
-                    n: nextN++,
-                    name: nodeName,
-                    x: position.x, y: position.y, z: position.z,
-                    intensity: parseInt(slider.value, 10),
-                    note: textArea.value.trim()
-                };
-                points.push(p);
-                addMarker(p);
-                savePoints();
-                renderList();
-                scene.remove(cardObject);
-                card.remove();
-            };
-
-            cardObject = new CSS2DObject(card);
-            cardObject.position.copy(position);
-            scene.add(cardObject);
-        }
-
-        // Restore any previously recorded points on load
-        loadPoints();
-        points.forEach(addMarker);
-        renderList();
-
-        // 9. Window Resizing Handler
-        window.addEventListener('resize', () => {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            labelRenderer.setSize(window.innerWidth, window.innerHeight);
-        });
-
-        // 10. Core Animation Loop
-        function animate() {
-            requestAnimationFrame(animate);
-            controls.update(); // Enforces inertia and damping
-            renderer.render(scene, camera);
-            labelRenderer.render(scene, camera);
-        }
-
-        animate();
-    </script>
+  </div>
+</div>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+
+/* ============================================================
+   0. The response scale
+   Chroma rises with severity, so a 0 reads as quiet and a 10
+   reads as loud. Each step carries its own legible text colour.
+   ============================================================ */
+
+const SCALE = [
+  { bg: '#5A6E76', fg: '#EAF0F2' },  // 0
+  { bg: '#6B7C74', fg: '#EAF0F2' },  // 1
+  { bg: '#808A6C', fg: '#12191C' },  // 2
+  { bg: '#979762', fg: '#12191C' },  // 3
+  { bg: '#AFA254', fg: '#12191C' },  // 4
+  { bg: '#C9A227', fg: '#12191C' },  // 5
+  { bg: '#CE8A2C', fg: '#12191C' },  // 6
+  { bg: '#D17130', fg: '#12191C' },  // 7
+  { bg: '#C9552F', fg: '#F4EFE8' },  // 8
+  { bg: '#BB362B', fg: '#F4EFE8' },  // 9
+  { bg: '#A81426', fg: '#F4EFE8' }   // 10
+];
+
+// Clinical anchors for the numeric rating scale
+const ANCHOR = (v) =>
+  v === 0 ? 'No response' :
+  v <= 3  ? 'Mild' :
+  v <= 6  ? 'Moderate' :
+  v <= 9  ? 'Severe' : 'Worst imaginable';
+
+// Paint the identity mark, which is also the legend for the markers
+(function paintMark() {
+  const bars = document.getElementById('mark-bars');
+  SCALE.forEach((step, i) => {
+    const bar = document.createElement('i');
+    bar.style.background = step.bg;
+    bar.style.height = (9 + i * 1.3) + 'px';
+    bars.appendChild(bar);
+  });
+})();
+
+/* ============================================================
+   1. Scene, camera, renderers
+   ============================================================ */
+
+const scene = new THREE.Scene();
+scene.fog = new THREE.FogExp2(0x101619, 0.03);
+
+const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+camera.position.set(0, 1.5, 4);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.outputEncoding = THREE.sRGBEncoding;
+document.getElementById('webgl-container').appendChild(renderer.domElement);
+
+const labelRenderer = new CSS2DRenderer();
+labelRenderer.setSize(window.innerWidth, window.innerHeight);
+labelRenderer.domElement.style.position = 'absolute';
+labelRenderer.domElement.style.top = '0px';
+document.getElementById('css-container').appendChild(labelRenderer.domElement);
+
+/* Darkfield lighting — cool key, faint cool fill, no coloured rim
+   (a coloured rim would compete with the response scale). */
+scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+
+const keyLight = new THREE.DirectionalLight(0xE6F0F2, 1.45);
+keyLight.position.set(5, 10, 7);
+scene.add(keyLight);
+
+const fillLight = new THREE.DirectionalLight(0x8FA3AB, 0.7);
+fillLight.position.set(-5, -5, -7);
+scene.add(fillLight);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.05;
+controls.target.set(0, 1, 0);
+
+/* ============================================================
+   2. Model loading
+   ============================================================ */
+
+let model = null;
+const loader = new GLTFLoader();
+
+const loadingEl  = document.getElementById('loading');
+const statusEl   = document.getElementById('load-status');
+const pickerEl   = document.getElementById('picker');
+const trackEl    = document.getElementById('track');
+const fillEl     = document.getElementById('track-fill');
+const bytesEl    = document.getElementById('load-bytes');
+const pctEl      = document.getElementById('load-pct');
+
+function setupModel(gltf) {
+  model = gltf.scene;
+
+  const box = new THREE.Box3().setFromObject(model);
+  const center = box.getCenter(new THREE.Vector3());
+  const size = box.getSize(new THREE.Vector3());
+  model.position.sub(center);
+
+  // Fit the camera to the model regardless of its native scale
+  const maxDim = Math.max(size.x, size.y, size.z);
+  const fitDist = (maxDim / 2) / Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+  camera.position.set(0, 0, fitDist * 1.6);
+  camera.near = maxDim / 100;
+  camera.far = fitDist * 100;
+  camera.updateProjectionMatrix();
+  controls.target.set(0, 0, 0);
+  controls.minDistance = maxDim * 0.2;
+  controls.maxDistance = fitDist * 8;
+  controls.update();
+
+  // Scale exponential fog to the model so it doesn't swallow large ones
+  scene.fog.density = 0.6 / (fitDist * 1.6);
+
+  model.traverse((child) => {
+    if (child.isMesh) {
+      child.material.transparent = true;
+      child.material.opacity = 0.94;
+      child.material.emissive = new THREE.Color(0x1B2A30);
+      child.material.emissiveIntensity = 0.35;
+    }
+  });
+
+  scene.add(model);
+  loadingEl.hidden = true;
+}
+
+// Fall back to manual selection (file:// blocks local fetches)
+function showPicker(message) {
+  statusEl.innerHTML = message;
+  trackEl.hidden = true;
+  bytesEl.textContent = '';
+  pctEl.textContent = '';
+  pickerEl.hidden = false;
+}
+
+function loadFromUrl(url) {
+  statusEl.innerHTML = 'Loading anatomical model';
+  bytesEl.textContent = 'nervous_system.glb';
+
+  loader.load(
+    url,
+    setupModel,
+    // The model is large — report determinate progress rather than sitting silent
+    (event) => {
+      const mb = (event.loaded / 1048576).toFixed(1);
+      if (event.total) {
+        const total = (event.total / 1048576).toFixed(1);
+        const pct = Math.round((event.loaded / event.total) * 100);
+        fillEl.style.width = pct + '%';
+        bytesEl.textContent = mb + ' of ' + total + ' MB';
+        pctEl.textContent = pct + '%';
+      } else {
+        bytesEl.textContent = mb + ' MB';
+      }
+    },
+    (error) => {
+      console.warn('Auto-load failed; offering manual selection.', error);
+      const hint = location.protocol === 'file:'
+        ? 'Browsers block local file reads over <code>file://</code>. Run <code>python3 -m http.server</code> in this folder, or choose the file below.'
+        : 'Check that the file sits beside this page, or choose it below.';
+      showPicker('<b>Couldn’t load nervous_system.glb.</b><br>' + hint);
+    }
+  );
+}
+
+function loadFromFile(file) {
+  pickerEl.hidden = true;
+  trackEl.hidden = false;
+  loadingEl.hidden = false;
+  statusEl.textContent = 'Reading the file';
+  bytesEl.textContent = file.name;
+  pctEl.textContent = '';
+  fillEl.style.width = '100%';
+
+  file.arrayBuffer().then((buf) => {
+    loader.parse(buf, '', setupModel, (error) => {
+      console.error('Failed to parse selected model.', error);
+      showPicker('<b>That file isn’t readable as glTF.</b><br>Choose a .glb or .gltf file.');
+    });
+  }).catch((error) => {
+    console.error('Failed to read selected file.', error);
+    showPicker('<b>Couldn’t read that file.</b><br>Choose it again.');
+  });
+}
+
+document.getElementById('model-file').addEventListener('change', (e) => {
+  if (e.target.files && e.target.files[0]) loadFromFile(e.target.files[0]);
+});
+
+window.addEventListener('dragover', (e) => e.preventDefault());
+window.addEventListener('drop', (e) => {
+  e.preventDefault();
+  const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+  if (file) loadFromFile(file);
+});
+
+// Always try the bundled model first; the picker is only a fallback.
+loadFromUrl('nervous_system.glb');
+
+/* ============================================================
+   3. Findings store
+   ============================================================ */
+
+const STORAGE_KEY = 'nsv_points_v1';
+let points = [];            // { id, n, name, x, y, z, intensity, note }
+let nextN = 1;
+const markers = new Map();  // id -> CSS2DObject
+
+const panelEl = document.getElementById('panel');
+const listEl  = document.getElementById('list');
+const tallyEl = document.getElementById('tally-n');
+const tallyLabelEl = document.getElementById('tally-l');
+
+function loadPoints() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    points = raw ? (JSON.parse(raw) || []) : [];
+  } catch (e) {
+    points = [];
+  }
+  nextN = points.reduce((m, p) => Math.max(m, p.n), 0) + 1;
+}
+
+function savePoints() {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(points)); } catch (e) {}
+}
+
+/* The marker carries its response colour, so the model itself
+   reads as the chart. */
+function addMarker(p, isNew) {
+  const step = SCALE[p.intensity];
+  const el = document.createElement('div');
+  el.className = 'sp-marker' + (isNew ? ' is-new' : '');
+
+  const dot = document.createElement('span');
+  dot.className = 'sp-marker-dot';
+  dot.textContent = p.n;
+  dot.style.background = step.bg;
+  dot.style.color = step.fg;
+  el.appendChild(dot);
+
+  const obj = new CSS2DObject(el);
+  obj.position.set(p.x, p.y, p.z);
+  scene.add(obj);
+  markers.set(p.id, obj);
+}
+
+function removeMarker(id) {
+  const obj = markers.get(id);
+  if (obj) { scene.remove(obj); markers.delete(id); }
+}
+
+function deletePoint(id) {
+  removeMarker(id);
+  points = points.filter(p => p.id !== id);
+  savePoints();
+  renderList();
+}
+
+function focusPoint(p) {
+  controls.target.set(p.x, p.y, p.z);
+  controls.update();
+}
+
+function renderList() {
+  tallyEl.textContent = points.length;
+  tallyLabelEl.textContent = points.length === 1 ? 'finding' : 'findings';
+  panelEl.classList.toggle('is-open', points.length > 0);
+  listEl.innerHTML = '';
+
+  const sorted = [...points].sort((a, b) => b.intensity - a.intensity);
+
+  for (const p of sorted) {
+    const step = SCALE[p.intensity];
+
+    // A row is a group: the recall control and the remove control are
+    // siblings, never nested.
+    const row = document.createElement('div');
+    row.className = 'sp-row';
+
+    const main = document.createElement('button');
+    main.className = 'sp-row-main';
+    main.type = 'button';
+    main.setAttribute('aria-label', 'Show point ' + p.n + ' on the model');
+    main.onclick = () => focusPoint(p);
+
+    const val = document.createElement('span');
+    val.className = 'sp-row-val';
+    val.textContent = p.intensity;
+    val.style.background = step.bg;
+    val.style.color = step.fg;
+    main.appendChild(val);
+
+    const body = document.createElement('span');
+    body.className = 'sp-row-body';
+
+    const site = document.createElement('span');
+    site.className = 'sp-row-site';
+    site.textContent = p.name;
+    body.appendChild(site);
+
+    const idx = document.createElement('span');
+    idx.className = 'sp-row-idx';
+    idx.textContent = 'point ' + p.n + ' · ' + ANCHOR(p.intensity);
+    body.appendChild(idx);
+
+    if (p.note) {
+      const note = document.createElement('span');
+      note.className = 'sp-row-note';
+      note.textContent = p.note;
+      body.appendChild(note);
+    }
+
+    main.appendChild(body);
+    row.appendChild(main);
+
+    const del = document.createElement('button');
+    del.className = 'sp-row-del';
+    del.type = 'button';
+    del.innerHTML = '&times;';
+    del.title = 'Remove point ' + p.n;
+    del.setAttribute('aria-label', 'Remove point ' + p.n);
+    del.onclick = () => deletePoint(p.id);
+    row.appendChild(del);
+
+    listEl.appendChild(row);
+  }
+}
+
+/* ============================================================
+   4. Recording a response
+   ============================================================ */
+
+let openCard = null;   // one record card at a time
+
+function closeCard() {
+  if (!openCard) return;
+  scene.remove(openCard.obj);
+  openCard.anchor.remove();
+  openCard = null;
+}
+
+function createRecordCard(position, siteName) {
+  closeCard();
+
+  const anchor = document.createElement('div');
+  anchor.className = 'sp-anchor';
+
+  const card = document.createElement('div');
+  card.className = 'sp-card';
+  anchor.appendChild(card);
+
+  // --- head
+  const head = document.createElement('div');
+  head.className = 'sp-card-head';
+
+  const heading = document.createElement('div');
+  const title = document.createElement('h3');
+  title.className = 'sp-card-title';
+  title.textContent = 'Record response';
+  const site = document.createElement('span');
+  site.className = 'sp-card-site';
+  site.textContent = siteName;
+  heading.appendChild(title);
+  heading.appendChild(site);
+
+  const close = document.createElement('button');
+  close.className = 'sp-card-close';
+  close.type = 'button';
+  close.innerHTML = '&times;';
+  close.setAttribute('aria-label', 'Discard this response');
+  close.onclick = closeCard;
+
+  head.appendChild(heading);
+  head.appendChild(close);
+  card.appendChild(head);
+
+  // --- gauge: readout + anchor word
+  let value = 5;
+
+  const gauge = document.createElement('div');
+  gauge.className = 'sp-gauge';
+
+  const readout = document.createElement('div');
+  readout.className = 'sp-readout';
+
+  const gLabel = document.createElement('div');
+  gLabel.className = 'sp-gauge-label';
+  const gLabelWord = document.createElement('b');
+  const gLabelSub = document.createTextNode('reported response');
+  gLabel.appendChild(gLabelWord);
+  gLabel.appendChild(gLabelSub);
+
+  gauge.appendChild(readout);
+  gauge.appendChild(gLabel);
+  card.appendChild(gauge);
+
+  // --- the ladder: 11 discrete rungs, a real radio group
+  const ladder = document.createElement('div');
+  ladder.className = 'sp-ladder';
+  ladder.setAttribute('role', 'radiogroup');
+  ladder.setAttribute('aria-label', 'Reported response, 0 to 10');
+
+  const rungs = [];
+
+  function setValue(v, moveFocus) {
+    value = v;
+    const step = SCALE[v];
+    readout.textContent = v;
+    readout.style.color = step.bg;
+    gLabelWord.textContent = ANCHOR(v);
+
+    rungs.forEach((rung, i) => {
+      const on = i === v;
+      rung.classList.toggle('is-set', on);
+      rung.setAttribute('aria-checked', on ? 'true' : 'false');
+      rung.tabIndex = on ? 0 : -1;
+      rung.style.background = on ? SCALE[i].bg : '';
+      rung.style.color = on ? SCALE[i].fg : '';
+    });
+
+    if (moveFocus) rungs[v].focus();
+  }
+
+  for (let i = 0; i <= 10; i++) {
+    const rung = document.createElement('button');
+    rung.className = 'sp-rung';
+    rung.type = 'button';
+    rung.setAttribute('role', 'radio');
+    rung.textContent = i;
+    rung.onclick = () => setValue(i, false);
+    ladder.appendChild(rung);
+    rungs.push(rung);
+  }
+
+  ladder.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowRight' || e.key === 'ArrowUp')   { e.preventDefault(); setValue(Math.min(10, value + 1), true); }
+    if (e.key === 'ArrowLeft'  || e.key === 'ArrowDown') { e.preventDefault(); setValue(Math.max(0,  value - 1), true); }
+    if (e.key === 'Home')  { e.preventDefault(); setValue(0, true); }
+    if (e.key === 'End')   { e.preventDefault(); setValue(10, true); }
+  });
+
+  card.appendChild(ladder);
+
+  const anchors = document.createElement('div');
+  anchors.className = 'sp-anchors';
+  ['none', 'moderate', 'worst imaginable'].forEach((t) => {
+    const s = document.createElement('span');
+    s.textContent = t;
+    anchors.appendChild(s);
+  });
+  card.appendChild(anchors);
+
+  // --- note
+  const field = document.createElement('div');
+  field.className = 'sp-field';
+
+  const noteId = 'note-' + nextN;
+  const label = document.createElement('label');
+  label.className = 'sp-field-label';
+  label.setAttribute('for', noteId);
+  label.textContent = 'Note (optional)';
+
+  const note = document.createElement('textarea');
+  note.className = 'sp-note';
+  note.id = noteId;
+  note.placeholder = 'sharp, radiating distally';
+
+  field.appendChild(label);
+  field.appendChild(note);
+  card.appendChild(field);
+
+  // --- commit. The action keeps its name through the flow.
+  const commit = document.createElement('button');
+  commit.className = 'sp-commit';
+  commit.type = 'button';
+  commit.textContent = 'Record';
+  commit.onclick = () => {
+    const p = {
+      id: 'p_' + Date.now() + '_' + nextN,
+      n: nextN++,
+      name: siteName,
+      x: position.x, y: position.y, z: position.z,
+      intensity: value,
+      note: note.value.trim()
+    };
+    points.push(p);
+    addMarker(p, true);
+    savePoints();
+    renderList();
+    closeCard();
+  };
+  card.appendChild(commit);
+
+  setValue(5, false);
+
+  const obj = new CSS2DObject(anchor);
+  obj.position.copy(position);
+  scene.add(obj);
+  openCard = { obj, anchor, card };
+  placeCard();
+}
+
+/* The card is anchored to a point that moves as the model rotates, so its
+   placement is re-checked each frame: flip below the anchor when there
+   isn't room above, and nudge sideways to stay on screen. */
+const RAIL_H = 96;
+const EDGE = 12;
+
+function placeCard() {
+  if (!openCard) return;
+  const { anchor, card } = openCard;
+
+  const pt = anchor.getBoundingClientRect();      // 0×0 — this is the point
+  const h  = card.offsetHeight;
+  const w  = card.offsetWidth;
+
+  const roomAbove = pt.top - RAIL_H - 34;
+  anchor.classList.toggle('is-below', roomAbove < h);
+
+  let nudge = 0;
+  const left = pt.left - w / 2;
+  if (left < EDGE) nudge = EDGE - left;
+  else if (left + w > window.innerWidth - EDGE) nudge = window.innerWidth - EDGE - (left + w);
+  card.style.setProperty('--nudge', nudge.toFixed(1) + 'px');
+}
+
+/* ============================================================
+   5. Picking a site on the model
+   ============================================================ */
+
+const raycaster = new THREE.Raycaster();
+raycaster.params.Line.threshold = 0.05;
+raycaster.params.Points.threshold = 0.05;
+
+const mouse = new THREE.Vector2();
+
+/* Double-click, not click: a single pointerdown is how the model is
+   dragged to rotate, and every drag would otherwise open a card. */
+window.addEventListener('dblclick', (event) => {
+  // Ignore double-clicks that land on the chrome
+  if (event.target.closest('.sp-card') ||
+      event.target.closest('.sp-panel') ||
+      event.target.closest('.sp-rail')) return;
+
+  mouse.x =  (event.clientX / window.innerWidth)  * 2 - 1;
+  mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+  raycaster.setFromCamera(mouse, camera);
+
+  if (!model) return;
+
+  const intersects = raycaster.intersectObject(model, true);
+  if (intersects.length > 0) {
+    const hit = intersects[0];
+    createRecordCard(hit.point, hit.object.name || 'Unnamed site');
+  }
+});
+
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeCard();
+});
+
+/* ============================================================
+   6. Restore, resize, render
+   ============================================================ */
+
+loadPoints();
+points.forEach((p) => addMarker(p, false));
+renderList();
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  labelRenderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+function animate() {
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
+  labelRenderer.render(scene, camera);
+  if (openCard) placeCard();
+}
+
+animate();
+</script>
 </body>
 </html>
