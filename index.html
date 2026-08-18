@@ -1,0 +1,714 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Human Nervous System - 3D Interactive Viewer</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #0b0c10;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            color: #c5c6c7;
+        }
+
+        #webgl-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 1;
+        }
+
+        #css-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 2;
+            /* CRITICAL: Prevent CSS container from blocking OrbitControls */
+            pointer-events: none;
+        }
+
+        /* The modular annotation container linked to the 3D position */
+        .annotation-card {
+            background: rgba(31, 40, 51, 0.95);
+            border: 1px solid #66fcf1;
+            border-radius: 8px;
+            padding: 15px;
+            width: 320px;
+            box-shadow: 0 8px 25px rgba(0,0,0,0.7);
+            /* CRITICAL: Allow interactions specifically on the UI elements */
+            pointer-events: auto;
+            backdrop-filter: blur(6px);
+            transition: opacity 0.3s ease;
+        }
+
+        .annotation-card h3 {
+            margin: 0 0 10px 0;
+            font-size: 16px;
+            color: #66fcf1;
+            border-bottom: 1px solid #45a29e;
+            padding-bottom: 5px;
+        }
+
+        .close-btn {
+            position: absolute;
+            top: 10px;
+            right: 15px;
+            cursor: pointer;
+            color: #ff5555;
+            font-size: 18px;
+            font-weight: bold;
+        }
+
+        .close-btn:hover { color: #ff0000; }
+
+        .slider-section {
+            margin-bottom: 15px;
+        }
+
+        .slider-label {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            font-size: 13px;
+            margin-bottom: 8px;
+        }
+
+        .slider-value {
+            font-size: 22px;
+            font-weight: bold;
+            color: #66fcf1;
+        }
+
+        .intensity-slider {
+            width: 100%;
+            -webkit-appearance: none;
+            appearance: none;
+            height: 6px;
+            border-radius: 3px;
+            background: linear-gradient(90deg, #45a29e, #66fcf1);
+            outline: none;
+        }
+
+        .intensity-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: #66fcf1;
+            border: 2px solid #0b0c10;
+            cursor: pointer;
+        }
+
+        .intensity-slider::-moz-range-thumb {
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: #66fcf1;
+            border: 2px solid #0b0c10;
+            cursor: pointer;
+        }
+
+        .note-section {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .note-input {
+            width: 100%;
+            height: 60px;
+            background: #0b0c10;
+            border: 1px solid #45a29e;
+            color: #fff;
+            padding: 5px;
+            border-radius: 4px;
+            resize: none;
+            box-sizing: border-box;
+            font-family: inherit;
+        }
+
+        .save-btn {
+            background: #45a29e;
+            color: #0b0c10;
+            border: none;
+            padding: 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: background 0.2s;
+        }
+
+        .save-btn:hover { background: #66fcf1; }
+
+        .saved-note-display {
+            background: #0b0c10;
+            padding: 10px;
+            border-left: 3px solid #66fcf1;
+            font-size: 13px;
+            display: none; /* Hidden until saved */
+            word-wrap: break-word;
+        }
+
+        /* Numbered marker anchored at each recorded point in 3D space */
+        .point-marker {
+            width: 26px;
+            height: 26px;
+            border-radius: 50%;
+            background: #66fcf1;
+            color: #0b0c10;
+            font-weight: bold;
+            font-size: 13px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 2px solid #0b0c10;
+            box-shadow: 0 0 8px rgba(102,252,241,0.8);
+            /* Must not block raycasting on the model */
+            pointer-events: none;
+        }
+
+        /* Recorded-points list panel */
+        #points-panel {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            width: 300px;
+            max-height: 80vh;
+            display: none; /* toggled to flex once a point exists */
+            flex-direction: column;
+            background: rgba(31, 40, 51, 0.95);
+            border: 1px solid #45a29e;
+            border-radius: 8px;
+            z-index: 15;
+            backdrop-filter: blur(6px);
+            box-shadow: 0 8px 25px rgba(0,0,0,0.7);
+            overflow: hidden;
+        }
+
+        #points-panel h3 {
+            margin: 0;
+            padding: 12px 15px;
+            font-size: 15px;
+            color: #66fcf1;
+            border-bottom: 1px solid #45a29e;
+        }
+
+        #points-panel h3 span {
+            color: #45a29e;
+            font-size: 13px;
+        }
+
+        #points-list {
+            overflow-y: auto;
+            padding: 8px;
+        }
+
+        .point-row {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            padding: 8px;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+
+        .point-row:hover { background: rgba(102,252,241,0.08); }
+
+        .point-badge {
+            flex: 0 0 24px;
+            height: 24px;
+            border-radius: 50%;
+            background: #66fcf1;
+            color: #0b0c10;
+            font-weight: bold;
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-top: 2px;
+        }
+
+        .point-body { flex: 1; min-width: 0; }
+
+        .point-score {
+            font-weight: bold;
+            color: #fff;
+            font-size: 14px;
+        }
+
+        .point-score small { color: #7c8a8a; font-weight: normal; }
+
+        .point-name {
+            font-size: 12px;
+            color: #66fcf1;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .point-note {
+            font-size: 12px;
+            color: #c5c6c7;
+            word-wrap: break-word;
+            margin-top: 2px;
+        }
+
+        .point-del {
+            flex: 0 0 auto;
+            color: #ff5555;
+            cursor: pointer;
+            font-weight: bold;
+            padding: 0 4px;
+        }
+
+        .point-del:hover { color: #ff0000; }
+
+        #ui-overlay {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 10;
+            pointer-events: none;
+        }
+
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 20;
+            font-size: 24px;
+            text-align: center;
+            background: rgba(0,0,0,0.8);
+            padding: 30px;
+            border-radius: 10px;
+            border: 1px solid #45a29e;
+        }
+    </style>
+
+    <!-- Import Map for ES Modules -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.jsdelivr.net/npm/three@0.150.1/build/three.module.js",
+                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.150.1/examples/jsm/"
+            }
+        }
+    </script>
+</head>
+<body>
+    <div id="loading">
+        <div id="loading-status">Initializing Neuro-Spatial Viewer...</div>
+        <div id="loading-picker" style="display:none; margin-top:14px;">
+            <label for="model-file" class="save-btn" style="display:inline-block; padding:10px 18px;">Select model (.glb / .gltf)</label>
+            <input id="model-file" type="file" accept=".glb,.gltf,model/gltf-binary,model/gltf+json" style="display:none;">
+            <div style="font-size:13px; color:#45a29e; margin-top:10px;">…or drag the model file anywhere onto this window</div>
+        </div>
+    </div>
+
+    <div id="ui-overlay">
+        <h2 style="margin: 0; color: #66fcf1;">Nervous System Topology</h2>
+        <p style="margin: 5px 0; font-size: 14px;">Left Click + Drag: Rotate | Scroll: Zoom | Click Nerve: Record Response</p>
+    </div>
+
+    <div id="points-panel">
+        <h3>Recorded Points <span id="points-count">0</span></h3>
+        <div id="points-list"></div>
+    </div>
+
+    <div id="webgl-container"></div>
+    <div id="css-container"></div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+        import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+
+        // 1. Core Scene & Camera Setup
+        const scene = new THREE.Scene();
+        scene.fog = new THREE.FogExp2(0x0b0c10, 0.03);
+
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 1.5, 4);
+
+        // 2. WebGL Renderer Initialization
+        const webglContainer = document.getElementById('webgl-container');
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // Performance optimization
+        renderer.outputEncoding = THREE.sRGBEncoding;
+        webglContainer.appendChild(renderer.domElement);
+
+        // 3. CSS2D Renderer for HTML Overlays
+        const cssContainer = document.getElementById('css-container');
+        const labelRenderer = new CSS2DRenderer();
+        labelRenderer.setSize(window.innerWidth, window.innerHeight);
+        labelRenderer.domElement.style.position = 'absolute';
+        labelRenderer.domElement.style.top = '0px';
+        cssContainer.appendChild(labelRenderer.domElement);
+
+        // 4. Lighting Configuration
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0xe0f2fe, 1.2);
+        dirLight.position.set(5, 10, 7);
+        scene.add(dirLight);
+
+        const backLight = new THREE.DirectionalLight(0x45a29e, 0.8);
+        backLight.position.set(-5, -5, -7);
+        scene.add(backLight);
+
+        // 5. OrbitControls Configuration
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.target.set(0, 1, 0);
+
+        // 6. Load GLB Model
+        let nervousSystemModel = null;
+        const loader = new GLTFLoader();
+
+        const loadingEl = document.getElementById('loading');
+        const statusEl = document.getElementById('loading-status');
+        const pickerEl = document.getElementById('loading-picker');
+
+        // Shared post-load setup: center, frame the camera, tune materials, reveal
+        function setupModel(gltf) {
+            nervousSystemModel = gltf.scene;
+
+            // Automatically compute bounding box to center the model
+            const box = new THREE.Box3().setFromObject(nervousSystemModel);
+            const center = box.getCenter(new THREE.Vector3());
+            const size = box.getSize(new THREE.Vector3());
+            nervousSystemModel.position.sub(center);
+
+            // Fit camera to the model regardless of its native scale
+            const maxDim = Math.max(size.x, size.y, size.z);
+            const fitDist = (maxDim / 2) / Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+            camera.position.set(0, 0, fitDist * 1.6);
+            camera.near = maxDim / 100;
+            camera.far = fitDist * 100;
+            camera.updateProjectionMatrix();
+            controls.target.set(0, 0, 0);
+            controls.minDistance = maxDim * 0.2;
+            controls.maxDistance = fitDist * 8;
+            controls.update();
+
+            // Scale exponential fog to the model's size so it doesn't swallow large models
+            scene.fog.density = 0.6 / (fitDist * 1.6);
+
+            // Enhance material visibility
+            nervousSystemModel.traverse((child) => {
+                if (child.isMesh) {
+                    child.material.transparent = true;
+                    child.material.opacity = 0.9;
+                    child.material.emissive = new THREE.Color(0x112233);
+                    child.material.emissiveIntensity = 0.2;
+                }
+            });
+
+            scene.add(nervousSystemModel);
+            loadingEl.style.display = 'none';
+        }
+
+        // Show the manual picker/drop UI (used on file:// or when auto-load fails)
+        function showPicker(message) {
+            statusEl.innerHTML = message;
+            pickerEl.style.display = 'block';
+        }
+
+        // Path A — fetch the model from the same directory (works when served over HTTP)
+        function loadFromUrl(url) {
+            statusEl.innerHTML = "Loading model…<br><small style='font-size:14px; color:#45a29e;'>Fetching " + url + "</small>";
+            loader.load(url, setupModel, undefined, function (error) {
+                console.warn('Auto-load failed; offering manual selection.', error);
+                showPicker("Couldn't auto-load <b>" + url + "</b>.<br><small style='font-size:14px; color:#ff5555;'>Select the model file to continue.</small>");
+            });
+        }
+
+        // Path B — parse a user-provided File (works with no server, e.g. file://)
+        function loadFromFile(file) {
+            statusEl.innerHTML = "Reading " + file.name + "…";
+            pickerEl.style.display = 'none';
+            loadingEl.style.display = 'block';
+            file.arrayBuffer().then(function (buf) {
+                loader.parse(buf, '', setupModel, function (error) {
+                    console.error('Failed to parse selected model.', error);
+                    showPicker("That file couldn't be parsed as glTF.<br><small style='font-size:14px; color:#ff5555;'>Try another .glb / .gltf file.</small>");
+                });
+            }).catch(function (error) {
+                console.error('Failed to read selected file.', error);
+                showPicker("Couldn't read that file.<br><small style='font-size:14px; color:#ff5555;'>Try again.</small>");
+            });
+        }
+
+        // Wire the file input
+        document.getElementById('model-file').addEventListener('change', function (e) {
+            if (e.target.files && e.target.files[0]) loadFromFile(e.target.files[0]);
+        });
+
+        // Drag-and-drop the model anywhere onto the window
+        window.addEventListener('dragover', function (e) { e.preventDefault(); });
+        window.addEventListener('drop', function (e) {
+            e.preventDefault();
+            const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+            if (file) loadFromFile(file);
+        });
+
+        // Over HTTP(S) auto-load from the same path; on file:// go straight to the picker
+        if (location.protocol === 'file:') {
+            showPicker("Running without a server.<br><small style='font-size:14px; color:#45a29e;'>Select or drag in the model file (e.g. neurology.glb).</small>");
+        } else {
+            loadFromUrl('nervous_system.glb');
+        }
+
+        // 7. Raycasting & Interaction Setup
+        const raycaster = new THREE.Raycaster();
+
+        // Optimize thresholds for potential Line or Point-based nerve architectures
+        raycaster.params.Line.threshold = 0.05;
+        raycaster.params.Points.threshold = 0.05;
+
+        const mouse = new THREE.Vector2();
+
+        window.addEventListener('pointerdown', onPointerDown);
+
+        function onPointerDown(event) {
+            // Early exit if the user is clicking on the annotation card or the points list
+            if (event.target.closest('.annotation-card') || event.target.closest('#points-panel')) return;
+
+            // Calculate mouse position in NDC (-1 to +1)
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+            raycaster.setFromCamera(mouse, camera);
+
+            if (nervousSystemModel) {
+                const intersects = raycaster.intersectObject(nervousSystemModel, true);
+
+                if (intersects.length > 0) {
+                    const hit = intersects[0];
+                    // Retrieve object name from GLB hierarchy, fallback to generic descriptor
+                    const nodeName = hit.object.name || "Peripheral Nerve Fascicle";
+                    createSpatialAnnotation(hit.point, nodeName);
+                }
+            }
+        }
+
+        // 8. Recorded points: data store, persistence, markers, and sorted list
+
+        const STORAGE_KEY = 'nsv_points_v1';
+        let points = [];            // { id, n, name, x, y, z, intensity, note }
+        let nextN = 1;
+        const markers = new Map();  // id -> CSS2DObject (numbered badge in 3D space)
+
+        const panelEl = document.getElementById('points-panel');
+        const listEl = document.getElementById('points-list');
+        const countEl = document.getElementById('points-count');
+
+        function loadPoints() {
+            try {
+                const raw = localStorage.getItem(STORAGE_KEY);
+                points = raw ? (JSON.parse(raw) || []) : [];
+            } catch (e) {
+                points = [];
+            }
+            nextN = points.reduce((m, p) => Math.max(m, p.n), 0) + 1;
+        }
+
+        function savePoints() {
+            try { localStorage.setItem(STORAGE_KEY, JSON.stringify(points)); } catch (e) {}
+        }
+
+        // A small numbered badge anchored at the point's 3D location
+        function addMarker(p) {
+            const el = document.createElement('div');
+            el.className = 'point-marker';
+            el.textContent = p.n;
+            const obj = new CSS2DObject(el);
+            obj.position.set(p.x, p.y, p.z);
+            scene.add(obj);
+            markers.set(p.id, obj);
+        }
+
+        function removeMarker(id) {
+            const obj = markers.get(id);
+            if (obj) { scene.remove(obj); markers.delete(id); }
+        }
+
+        function deletePoint(id) {
+            removeMarker(id);
+            points = points.filter(p => p.id !== id);
+            savePoints();
+            renderList();
+        }
+
+        // Re-center the orbit target on a point (clicking a list row)
+        function focusPoint(p) {
+            controls.target.set(p.x, p.y, p.z);
+            controls.update();
+        }
+
+        // Render the list, sorted by response intensity (highest first)
+        function renderList() {
+            countEl.textContent = points.length;
+            listEl.innerHTML = '';
+            panelEl.style.display = points.length ? 'flex' : 'none';
+
+            const sorted = [...points].sort((a, b) => b.intensity - a.intensity);
+            for (const p of sorted) {
+                const row = document.createElement('div');
+                row.className = 'point-row';
+                row.onclick = () => focusPoint(p);
+
+                const badge = document.createElement('div');
+                badge.className = 'point-badge';
+                badge.textContent = p.n;
+
+                const body = document.createElement('div');
+                body.className = 'point-body';
+
+                const score = document.createElement('div');
+                score.className = 'point-score';
+                score.innerHTML = p.intensity + ' <small>/ 10</small>';
+                body.appendChild(score);
+
+                const name = document.createElement('div');
+                name.className = 'point-name';
+                name.textContent = p.name;
+                body.appendChild(name);
+
+                if (p.note) {
+                    const note = document.createElement('div');
+                    note.className = 'point-note';
+                    note.textContent = p.note;
+                    body.appendChild(note);
+                }
+
+                const del = document.createElement('span');
+                del.className = 'point-del';
+                del.innerHTML = '&times;';
+                del.title = 'Remove point';
+                del.onclick = (e) => { e.stopPropagation(); deletePoint(p.id); };
+
+                row.appendChild(badge);
+                row.appendChild(body);
+                row.appendChild(del);
+                listEl.appendChild(row);
+            }
+        }
+
+        // The click-spawned card: slider for perceived response (0-10) + note
+        function createSpatialAnnotation(position, nodeName) {
+            const card = document.createElement('div');
+            card.className = 'annotation-card';
+
+            let cardObject; // assigned below; referenced by the close/save handlers
+
+            const closeBtn = document.createElement('span');
+            closeBtn.className = 'close-btn';
+            closeBtn.innerHTML = '&times;';
+            closeBtn.onclick = () => { scene.remove(cardObject); card.remove(); };
+            card.appendChild(closeBtn);
+
+            const title = document.createElement('h3');
+            title.innerText = `Node: ${nodeName}`;
+            card.appendChild(title);
+
+            // Perceived-response slider (0-10) with live readout
+            const sliderSection = document.createElement('div');
+            sliderSection.className = 'slider-section';
+
+            const sliderLabel = document.createElement('div');
+            sliderLabel.className = 'slider-label';
+            const sliderText = document.createElement('span');
+            sliderText.textContent = 'Perceived response (0–10)';
+            const sliderValue = document.createElement('span');
+            sliderValue.className = 'slider-value';
+            sliderValue.textContent = '5';
+            sliderLabel.appendChild(sliderText);
+            sliderLabel.appendChild(sliderValue);
+
+            const slider = document.createElement('input');
+            slider.type = 'range';
+            slider.min = '0';
+            slider.max = '10';
+            slider.step = '1';
+            slider.value = '5';
+            slider.className = 'intensity-slider';
+            slider.oninput = () => { sliderValue.textContent = slider.value; };
+
+            sliderSection.appendChild(sliderLabel);
+            sliderSection.appendChild(slider);
+            card.appendChild(sliderSection);
+
+            // Optional note
+            const noteSection = document.createElement('div');
+            noteSection.className = 'note-section';
+            const textArea = document.createElement('textarea');
+            textArea.className = 'note-input';
+            textArea.placeholder = "Enter clinical or anatomical observation here...";
+            const saveBtn = document.createElement('button');
+            saveBtn.className = 'save-btn';
+            saveBtn.innerText = "Save Point";
+            noteSection.appendChild(textArea);
+            noteSection.appendChild(saveBtn);
+            card.appendChild(noteSection);
+
+            saveBtn.onclick = () => {
+                const p = {
+                    id: 'p_' + Date.now() + '_' + nextN,
+                    n: nextN++,
+                    name: nodeName,
+                    x: position.x, y: position.y, z: position.z,
+                    intensity: parseInt(slider.value, 10),
+                    note: textArea.value.trim()
+                };
+                points.push(p);
+                addMarker(p);
+                savePoints();
+                renderList();
+                scene.remove(cardObject);
+                card.remove();
+            };
+
+            cardObject = new CSS2DObject(card);
+            cardObject.position.copy(position);
+            scene.add(cardObject);
+        }
+
+        // Restore any previously recorded points on load
+        loadPoints();
+        points.forEach(addMarker);
+        renderList();
+
+        // 9. Window Resizing Handler
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            labelRenderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // 10. Core Animation Loop
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update(); // Enforces inertia and damping
+            renderer.render(scene, camera);
+            labelRenderer.render(scene, camera);
+        }
+
+        animate();
+    </script>
+</body>
+</html>
